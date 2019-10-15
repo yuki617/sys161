@@ -24,9 +24,9 @@ void sys__exit(int exitcode) {
   struct proc *p = curproc;
   /* for now, just include this to keep the compiler from complaining about
      an unused variable */
-  //(void)exitcode;
-  pid_setexitstatus(p->p_pid, exitcode);
-  pid_setisexited(p->p_pid, true);
+  (void)exitcode;
+  //pid_setexitstatus(p->p_pid, exitcode);
+  //pid_setisexited(p->p_pid, true);
 
   DEBUG(DB_SYSCALL,"Syscall: _exit(%d)\n",exitcode);
 
@@ -42,10 +42,11 @@ void sys__exit(int exitcode) {
   as = curproc_setas(NULL);
   as_destroy(as);
 
-  struct semaphore *pid_sem = pid_getsem(p->p_pid);
-  #if OPT_A2
-      V(pid_sem);
-  #endif
+  // struct semaphore *pid_sem = pid_getsem(p->p_pid);
+  // #if OPT_A2
+  //     V(pid_sem);
+  // #endif
+
   /* detach this thread from its process */
   /* note: curproc cannot be used after this call */
   proc_remthread(curthread);
@@ -121,7 +122,9 @@ pid_t sys__fork(struct trapframe *ctf, pid_t *retval) {
 
   struct proc *childproc = proc_create_runprogram(curproc->p_name);
   struct proc *p = curproc;
-  pid_setparentpid(childproc->p_pid, curproc->p_pid);
+  childproc->p_parent = curproc;
+  array_add(p->p_children,childproc, NULL);
+  //pid_setparentpid(childproc->p_pid, curproc->p_pid);
   //changeparentpid(curproc);
   if(childproc == NULL){
     kfree(tf_child);

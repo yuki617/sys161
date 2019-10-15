@@ -78,9 +78,11 @@ struct semaphore *no_proc_sem;
 
 //Table to keep track of process Pids
 
-static Pid *process_Pids[PID_MAX];
+//static Pid *process_Pids[PID_MAX];
 
 static struct lock *process_Pids_lock;
+
+pid_t pidnum = 2;
 
 #endif /* OPT_A2 */
 
@@ -117,6 +119,17 @@ proc_create(const char *name)
 #ifdef UW
 	proc->console = NULL;
 #endif // UW
+
+#if OPT_A2
+
+	proc->p_parent=NULL;
+	proc->p_children = array_create();
+  	array_init(proc->p_children);
+	proc->p_lk = lock_create("p lock");
+	proc->p_cv = cv_create("cv lock");
+	proc->p_exitStatus =0;
+
+#endif
 
 	return proc;
 }
@@ -178,17 +191,29 @@ proc_destroy(struct proc *proc)
 	}
 #endif // UW
 
+	proc->p_exitStatus =1;
 	#if OPT_A2
-
-		pid_destroy(proc->p_pid);
-
+		threadarray_cleanup(&proc->p_threads);
+		spinlock_cleanup(&proc->p_lock);
+		lock_destroy(proc->p_lk);
+		cv_destroy(proc->p_cv);
+		for(int i=array_num(proc->p_children)-1; i >= 0; i--){
+			struct proc *child= array_get(proc->p_children,i);
+			if (child->p_exitStatus ==1){
+				proc_destroy(child);
+				array_remove(proc->p_children,i);
+			}
+		}
+		if (proc->p_parent == NULL){
+			kfree(proc->p_name);
+			kfree(proc);
+		}
+	#else
+		threadarray_cleanup(&proc->p_threads);
+		spinlock_cleanup(&proc->p_lock);
+		kfree(proc->p_name);
+		kfree(proc);
 	#endif
-
-	threadarray_cleanup(&proc->p_threads);
-	spinlock_cleanup(&proc->p_lock);
-
-	kfree(proc->p_name);
-	kfree(proc);
 
 #ifdef UW
 	/* decrement the process count */
@@ -417,81 +442,12 @@ pid_create(void)
 {
 
 	lock_acquire(process_Pids_lock);
-
-	//If p_pid is returned as below PID_MIN, then we have an error in creating the pid
-	
-	//Equivalent to 1 because PID_MIN is 2;
-	
-	int error = PID_MIN - 1;
-
-	pid_t pid = error;
-
-	for(pid_t idx = PID_MIN; idx < PID_MAX; idx++) {
-		if (process_Pids[idx] == NULL) {
-			pid = idx;
-			break;
-		}
-	}
-
-	if(pid == error) {
-		return error;
-	}
-
-	process_Pids[pid] = kmalloc(sizeof(Pid*));
-	if (process_Pids[pid] == NULL) {
-		return error;
-	}
-
-	//parent Pid is actually set when sys_fork is called
-	process_Pids[pid]->p_parentPid = 0;
-
-	process_Pids[pid]->p_exitStatus = 0;
-
-	process_Pids[pid]->p_isExited= false;
-
-	process_Pids[pid]->p_sem = sem_create("p_sem", 0);
-	if (process_Pids[pid]->p_sem == NULL) {
-		kfree(process_Pids[pid]);
-		return error;
-	}
-
+	pid_t pid = pidnum;
+	pidnum++;
 	lock_release(process_Pids_lock);
 
 	return pid;
 }
 
-void
-pid_destroy(pid_t pid) {
-
-	lock_acquire(process_Pids_lock);
-
-	//Only destroy the Pid when we know the parent cannot be possibly waiting on it via wait_pid
-	if(process_Pids[process_Pids[pid]->p_parentPid] == NULL) {
-		
-		sem_destroy(process_Pids[pid]->p_sem);
-		kfree(process_Pids[pid]);
-		//Will reclamation of pids
-		process_Pids[pid] = NULL;
-	}
-
-	lock_release(process_Pids_lock);
-}
-
-void pid_setparentpid(pid_t pid_child, pid_t pid_parent){
-		process_Pids[pid_child]->p_parentPid = pid_parent;
-}
-
-struct semaphore *pid_getsem(pid_t pid){
-		return process_Pids[pid]->p_sem;
-}
-
-
-void pid_setexitstatus(pid_t pid, int exitStatus){
-		process_Pids[pid]->p_exitStatus = exitStatus;
-    }
-
-void pid_setisexited(pid_t pid, bool isExited){
-    	process_Pids[pid]->p_isExited = isExited;
-}
     
 #endif

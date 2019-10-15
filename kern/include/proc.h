@@ -72,24 +72,27 @@ struct proc {
 
 #ifdef OPT_A2
 	pid_t p_pid;
+	struct proc *p_parent;
+	struct array *p_children;
+	struct lock *p_lk;
+	struct cv *p_cv;
+	int p_exitStatus;
 
 #endif
 	/* add more material here as needed */
 };
+// #ifdef OPT_A2
+// typedef struct {
 
-typedef struct {
-
-	pid_t p_parentPid;
-	
-	int p_exitStatus;
-	bool p_isExited;
-	
-	//synchronization primitives for exit, waitpid
-
-  	struct semaphore *p_sem;
+// 	pid_t p_parentPid;
+// 	struct array *p_childrenPids;
+// 	int p_exitStatus;
+// 	//synchronization primitives for exit, waitpid
+//   	struct lock *p_lk;
+// 	struct cv *p_cv;
   	
-} Pid;
-
+// } Pid;
+// #endif
 /* This is the process structure for the kernel and for kernel-only threads. */
 extern struct proc *kproc;
 
@@ -122,15 +125,15 @@ struct addrspace *curproc_setas(struct addrspace *);
 //void changeparentpid(struct proc *p);
 void pid_setparentpid(pid_t pid_child, pid_t pid_parent);
 
-void pid_destroy(pid_t pid);
+//void pid_destroy(struct proc *proc);
 
 pid_t pid_create(void);
 
-struct semaphore *pid_getsem(pid_t pid);
+// struct semaphore *pid_getsem(pid_t pid);
 
-void pid_setexitstatus(pid_t pid, int exitStatus);
+// void pid_setexitstatus(pid_t pid, int exitStatus);
 
-void pid_setisexited(pid_t pid, bool isExited);
+// void pid_setisexited(pid_t pid, bool isExited);
 
 
 #endif /* _PROC_H_ */
