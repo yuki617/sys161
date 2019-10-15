@@ -24,7 +24,7 @@ void sys__exit(int exitcode) {
   struct proc *p = curproc;
   /* for now, just include this to keep the compiler from complaining about
      an unused variable */
-  (void)exitcode;
+  p->p_exitcode =exitcode;
   //pid_setexitstatus(p->p_pid, exitcode);
   //pid_setisexited(p->p_pid, true);
 
@@ -67,8 +67,12 @@ sys_getpid(pid_t *retval)
 {
   /* for now, this is just a stub that always returns a PID of 1 */
   /* you need to fix this to make it work properly */
-  *retval = 1;
-  return(0);
+  #if OPT_A2
+    *retval = curproc->p_pid;
+  #else
+    *retval = 1;
+  #endif
+  return 0;
 }
 
 /* stub handler for waitpid() system call                */
@@ -95,13 +99,42 @@ sys_waitpid(pid_t pid,
     return(EINVAL);
   }
   /* for now, just pretend the exitstatus is 0 */
-  exitstatus = 0;
+  //exitstatus = 0;
   result = copyout((void *)&exitstatus,status,sizeof(int));
   if (result) {
     return(result);
   }
   *retval = pid;
-  return(0);
+
+  #if OPT_A2
+  struct proc *child = NULL;
+  for(int i=array_num(curproc->p_children)-1; i >= 0; i--){
+			child= array_get(curproc->p_children,i);
+      if (child->p_pid == pid){
+        break;
+      }
+  }
+  if (child ==NULL){
+    return ENOMEM;
+  }
+  lock_acquire(child->p_lk);
+  if(child->p_exitStatus ==-1){
+    cv_wait(child->p_cv,child->p_lk);
+  }
+  lock_release(child->p_lk);
+  exitstatus = _MKWAIT_EXIT(child->p_exitcode);
+  child_destroy(child);
+  #else
+  exitstatus = 0;
+  #endif
+
+  result = copyout((void *)&exitstatus,status,sizeof(int));
+  if (result) {
+    return result;
+  }
+  *retval = pid;
+
+  return 0;
 }
 
 void thread_fork_init(void * data1, unsigned long data2){

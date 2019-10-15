@@ -77,6 +77,7 @@ struct proc {
 	struct lock *p_lk;
 	struct cv *p_cv;
 	int p_exitStatus;
+	int p_exitcode;
 
 #endif
 	/* add more material here as needed */
@@ -128,6 +129,8 @@ void pid_setparentpid(pid_t pid_child, pid_t pid_parent);
 //void pid_destroy(struct proc *proc);
 
 pid_t pid_create(void);
+
+void child_destroy(struct proc *proc);
 
 // struct semaphore *pid_getsem(pid_t pid);
 

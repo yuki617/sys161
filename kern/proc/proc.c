@@ -127,8 +127,9 @@ proc_create(const char *name)
   	array_init(proc->p_children);
 	proc->p_lk = lock_create("p lock");
 	proc->p_cv = cv_create("cv lock");
-	proc->p_exitStatus =0;
-
+	proc->p_exitStatus =-1;
+	proc->p_exitcode =0;
+	proc->p_pid =0;
 #endif
 
 	return proc;
@@ -191,22 +192,19 @@ proc_destroy(struct proc *proc)
 	}
 #endif // UW
 
-	proc->p_exitStatus =1;
+	proc->p_exitStatus =0;
 	#if OPT_A2
 		threadarray_cleanup(&proc->p_threads);
 		spinlock_cleanup(&proc->p_lock);
-		lock_destroy(proc->p_lk);
-		cv_destroy(proc->p_cv);
-		for(int i=array_num(proc->p_children)-1; i >= 0; i--){
-			struct proc *child= array_get(proc->p_children,i);
-			if (child->p_exitStatus ==1){
-				proc_destroy(child);
-				array_remove(proc->p_children,i);
-			}
-		}
 		if (proc->p_parent == NULL){
+			lock_destroy(proc->p_lk);
+			cv_destroy(proc->p_cv);
 			kfree(proc->p_name);
 			kfree(proc);
+		}else{
+			lock_acquire(proc->p_lk);
+			cv_signal(proc->p_cv,proc->p_lk);
+			lock_release(proc->p_lk);
 		}
 	#else
 		threadarray_cleanup(&proc->p_threads);
@@ -447,6 +445,13 @@ pid_create(void)
 	lock_release(process_Pids_lock);
 
 	return pid;
+}
+
+void child_destroy(struct proc *proc){
+	lock_destroy(proc->p_lk);
+	cv_destroy(proc->p_cv);
+	kfree(proc->p_name);
+	kfree(proc);
 }
 
     
