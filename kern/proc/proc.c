@@ -76,10 +76,6 @@ struct semaphore *no_proc_sem;
 
 #if OPT_A2
 
-//Table to keep track of process Pids
-
-//static Pid *process_Pids[PID_MAX];
-
 static struct lock *process_Pids_lock;
 
 pid_t pidnum = 2;
@@ -192,8 +188,8 @@ proc_destroy(struct proc *proc)
 	}
 #endif // UW
 
-	proc->p_exitStatus =0;
 	#if OPT_A2
+		proc->p_exitStatus =0;
 		threadarray_cleanup(&proc->p_threads);
 		spinlock_cleanup(&proc->p_lock);
 		if (proc->p_parent == NULL){
@@ -287,7 +283,10 @@ proc_create_runprogram(const char *name)
 
 	#if OPT_A2
 
-		proc->p_pid = pid_create();
+		lock_acquire(process_Pids_lock);
+		proc->p_pid = pidnum;
+		pidnum++;
+		lock_release(process_Pids_lock);
 		if(proc->p_pid < PID_MIN) {
 			kfree(proc);
 			return NULL;
@@ -434,18 +433,6 @@ curproc_setas(struct addrspace *newas)
 }
 
 #if OPT_A2
-
-pid_t 
-pid_create(void)
-{
-
-	lock_acquire(process_Pids_lock);
-	pid_t pid = pidnum;
-	pidnum++;
-	lock_release(process_Pids_lock);
-
-	return pid;
-}
 
 void child_destroy(struct proc *proc){
 	lock_destroy(proc->p_lk);

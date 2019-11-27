@@ -133,6 +133,9 @@ syscall(struct trapframe *tf)
 	case SYS_fork:
 	  err = sys__fork(tf, (pid_t *) &retval);
 	  break;
+	case SYS_execv:
+	  err = execv((char *)tf->tf_a0,(char **)tf->tf_a1);
+	  break;
 #endif // UW
 
 	    /* Add stuff here */
@@ -190,6 +193,5 @@ enter_forked_process(struct trapframe *tf)
 	new_tf.tf_a3 = 0;
 
 	new_tf.tf_epc += 4;
-	as_activate();
 	mips_usermode(&new_tf);
 }

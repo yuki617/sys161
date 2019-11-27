@@ -66,6 +66,7 @@ int sys_waitpid(pid_t pid, userptr_t status, int options, pid_t *retval);
 
 void thread_fork_init(void * data1, unsigned long data2);
 pid_t sys__fork(struct trapframe *ctf, pid_t *retval);
+int execv(const char *program,char** args);
 
 #endif // UW
 

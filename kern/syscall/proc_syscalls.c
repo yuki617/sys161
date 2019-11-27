@@ -12,8 +12,91 @@
 #include <synch.h>
 #include <machine/trapframe.h>
 #include <copyinout.h>
+#include <kern/fcntl.h>
+#include <vfs.h>
+#include <test.h>
+#include <limits.h>
 
 
+int execv(const char *program,char**args){
+    char * program_kernel = kmalloc((strlen(program) + 1) * sizeof(char));
+    vaddr_t entrypoint, stackptr;
+    struct vnode *v;
+    char **kernelargs;
+    int arg_len =0;
+    for(unsigned int i =0; args[i]!=NULL;i++){
+        arg_len++;
+    }
+    kernelargs = kmalloc(sizeof(char *) * (arg_len+1));
+    for(int i =0; i < arg_len;i++){
+      kernelargs[i] = kmalloc((strlen(args[i])+1)* sizeof(char));
+      copyin((const_userptr_t) args[i], kernelargs[i], (strlen(args[i])+1)*sizeof(char));
+    }
+    kernelargs[arg_len] =NULL;
+    /* Open the file. */
+    copyin((const_userptr_t) program, (void *) program_kernel, (strlen(program) + 1) * sizeof(char));
+    int result = vfs_open(program_kernel,O_RDONLY, 0, &v);
+    if (result) {
+      return result;
+    }
+
+    /* Create a new address space. */
+    struct addrspace * as = as_create();
+    if (as ==NULL) {
+      vfs_close(v);
+      return ENOMEM;
+    }
+
+    /* Switch to it and activate it. */
+    struct addrspace * oldas = curproc_setas(as);
+    as_activate();
+
+    result = load_elf(v, &entrypoint);
+    if (result) {
+      vfs_close(v);
+      return result;
+    }
+    vfs_close(v);
+
+        /* Define the user stack in the address space */
+    result = as_define_stack(as, &stackptr);
+    if (result) {
+      /* p_addrspace will go away when curproc is destroyed */
+      return result;
+    }
+    
+    vaddr_t temp_stack_ptr = stackptr;
+    vaddr_t *stack = kmalloc((arg_len + 1) * sizeof(vaddr_t));
+    size_t actualarglen[arg_len];
+    for (int i = 0; i <arg_len; i++){
+      actualarglen[i] = strlen(kernelargs[i]) + 1;
+    }
+    for(int i =arg_len-1; i >=0; i--){
+      temp_stack_ptr = temp_stack_ptr - ROUNDUP(actualarglen[i], 8);
+	  //kprintf("%s",kernelArgs[i]);
+      copyoutstr(kernelargs[i],(userptr_t) temp_stack_ptr,ARG_MAX, &actualarglen[i]);
+      stack[i] = temp_stack_ptr;
+    }
+    stack[arg_len] =(vaddr_t)NULL;
+    for(int i =arg_len; i >=0; i--){
+      temp_stack_ptr = temp_stack_ptr - sizeof(vaddr_t);
+      copyout(&stack[i],(userptr_t) temp_stack_ptr,sizeof(vaddr_t)) ;
+    }
+    
+    as_destroy(oldas);
+
+  vaddr_t userspace = 0;
+
+  if(arg_len >=1){
+      userspace = temp_stack_ptr;
+
+  }
+	/* Warp to user mode. */
+	 enter_new_process(arg_len /*argc*/, (userptr_t) userspace /*userspace addr of argv*/,
+			  ROUNDUP(temp_stack_ptr,8), entrypoint);
+    panic("enter_new_process returned\n");
+    return EINVAL;
+}
 
   /* this implementation of sys__exit does not do anything with the exit code */
   /* this needs to be fixed to get exit() and waitpid() working properly */
@@ -24,9 +107,11 @@ void sys__exit(int exitcode) {
   struct proc *p = curproc;
   /* for now, just include this to keep the compiler from complaining about
      an unused variable */
-  p->p_exitcode =exitcode;
-  //pid_setexitstatus(p->p_pid, exitcode);
-  //pid_setisexited(p->p_pid, true);
+  #if OPT_A2
+       p->p_exitcode =exitcode;
+  #else
+      (void)exitcode;
+  #endif
 
   DEBUG(DB_SYSCALL,"Syscall: _exit(%d)\n",exitcode);
 
@@ -41,11 +126,6 @@ void sys__exit(int exitcode) {
    */
   as = curproc_setas(NULL);
   as_destroy(as);
-
-  // struct semaphore *pid_sem = pid_getsem(p->p_pid);
-  // #if OPT_A2
-  //     V(pid_sem);
-  // #endif
 
   /* detach this thread from its process */
   /* note: curproc cannot be used after this call */
@@ -138,15 +218,12 @@ sys_waitpid(pid_t pid,
 }
 
 void thread_fork_init(void * data1, unsigned long data2){
-    //Stop the compiler from complaining
     (void)data2;
-
     enter_forked_process((struct trapframe *) data1);
 
 }
 
 pid_t sys__fork(struct trapframe *ctf, pid_t *retval) {
-  //kprintf("sys_fork could not create new address space\n");
   struct trapframe *tf_child = kmalloc(sizeof(struct trapframe));
   if (tf_child == NULL){
     return ENOMEM;
@@ -157,27 +234,19 @@ pid_t sys__fork(struct trapframe *ctf, pid_t *retval) {
   struct proc *p = curproc;
   childproc->p_parent = curproc;
   array_add(p->p_children,childproc, NULL);
-  //pid_setparentpid(childproc->p_pid, curproc->p_pid);
-  //changeparentpid(curproc);
+
   if(childproc == NULL){
     kfree(tf_child);
     return ENOMEM;
   } 
-  //kprintf("enter spinlock \n");
-  //spinlock_acquire(&childproc->p_lock);
-  //kprintf("sys_fork could not create new address space\n");
+
   int res = as_copy(p->p_addrspace,&childproc->p_addrspace);
   if(res!=0){
     kfree(tf_child);
     proc_destroy(childproc);
     return ENOMEM;
   }
-  // lock_acquire(p->wait_lock);
-  // childproc->parent = curproc;
-  // array_add(p->children,childproc,NULL);
-  // lock_release(p->wait_lock);
   pid_t result = thread_fork(p->p_name,childproc,thread_fork_init,tf_child,0);
-  //kprintf("gdb 1 \n");
   if(result != 0){
     as_destroy(childproc->p_addrspace);
     proc_destroy(childproc);
@@ -185,9 +254,6 @@ pid_t sys__fork(struct trapframe *ctf, pid_t *retval) {
     DEBUG(DB_SYSCALL, "thread forking failed");
     return ENOMEM;
   }
-  //kprintf("three");
-  //DEBUG(DB_SYSCALL, "three");
   *retval = childproc->p_pid;
-  //kprintf("gdb 3 \n");
   return 0;
 }

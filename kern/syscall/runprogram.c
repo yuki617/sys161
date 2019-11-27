@@ -44,6 +44,9 @@
 #include <vfs.h>
 #include <syscall.h>
 #include <test.h>
+#include <copyinout.h>
+#include "opt-A2.h"
+#include <limits.h>
 
 /*
  * Load program "progname" and start running it in usermode.
@@ -51,6 +54,86 @@
  *
  * Calls vfs_open on progname and thus may destroy it.
  */
+ #if OPT_A2
+int
+runprogram(char *program, char ** args, unsigned int nargs){
+    vaddr_t entrypoint, stackptr;
+    struct vnode *v;
+    (void)args;
+	char **kernelargs = args;
+
+    int arg_len = nargs;
+
+	/* Open the file. */
+	int result = vfs_open(program, O_RDONLY, 0, &v);
+	if (result) {
+		return result;
+	}
+
+	/* We should be a new process. */
+	KASSERT(curproc_getas() == NULL);
+
+	/* Create a new address space. */
+	struct addrspace * as = as_create();
+	if (as ==NULL) {
+		vfs_close(v);
+		return ENOMEM;
+	}
+
+	/* Switch to it and activate it. */
+	struct addrspace * oldas = curproc_setas(as);
+	as_activate();
+
+	/* Load the executable. */
+	result = load_elf(v, &entrypoint);
+	if (result) {
+		/* p_addrspace will go away when curproc is destroyed */
+		vfs_close(v);
+		return result;
+	}
+
+	/* Done with the file now. */
+	vfs_close(v);
+
+	/* Define the user stack in the address space */
+	result = as_define_stack(as, &stackptr);
+	if (result) {
+		/* p_addrspace will go away when curproc is destroyed */
+		return result;
+	}
+
+	vaddr_t temp_stack_ptr = stackptr;
+    vaddr_t *stack = kmalloc((arg_len + 1) * sizeof(vaddr_t));
+	size_t actualarglen[arg_len];
+	for (int i = 0; i <arg_len; i++){
+		actualarglen[i] = strlen(kernelargs[i]) + 1;
+	}
+    for(int i =arg_len-1; i >=0; i--){
+      temp_stack_ptr = temp_stack_ptr - ROUNDUP(actualarglen[i], 8);
+	  //kprintf("%s",kernelArgs[i]);
+      copyoutstr(kernelargs[i],(userptr_t) temp_stack_ptr,ARG_MAX, &actualarglen[i]);
+      stack[i] = temp_stack_ptr;
+    }
+    stack[arg_len] =(vaddr_t)NULL;
+    for(int i =arg_len; i >=0; i--){
+      temp_stack_ptr = temp_stack_ptr - sizeof(vaddr_t);
+      copyout(&stack[i],(userptr_t) temp_stack_ptr,sizeof(vaddr_t)) ;
+    }
+
+	as_destroy(oldas);
+
+	vaddr_t userspace = 0;
+
+	if(arg_len >=1){
+		userspace = temp_stack_ptr;
+	}
+	/* Warp to user mode. */
+	 enter_new_process(arg_len /*argc*/, (userptr_t) userspace /*userspace addr of argv*/,
+			  ROUNDUP(temp_stack_ptr,8), entrypoint);
+    panic("enter_new_process returned\n");
+    return EINVAL;
+}
+#else
 int
 runprogram(char *progname)
 {
@@ -105,4 +188,5 @@ runprogram(char *progname)
 	panic("enter_new_process returned\n");
 	return EINVAL;
 }
+#endif
 

@@ -123,20 +123,8 @@ struct addrspace *curproc_getas(void);
 /* Change the address space of the current process, and return the old one. */
 struct addrspace *curproc_setas(struct addrspace *);
 
-//void changeparentpid(struct proc *p);
 void pid_setparentpid(pid_t pid_child, pid_t pid_parent);
 
-//void pid_destroy(struct proc *proc);
-
-pid_t pid_create(void);
-
 void child_destroy(struct proc *proc);
-
-// struct semaphore *pid_getsem(pid_t pid);
-
-// void pid_setexitstatus(pid_t pid, int exitStatus);
-
-// void pid_setisexited(pid_t pid, bool isExited);
-
 
 #endif /* _PROC_H_ */
