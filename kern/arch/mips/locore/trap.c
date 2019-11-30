@@ -39,7 +39,7 @@
 #include <vm.h>
 #include <mainbus.h>
 #include <syscall.h>
-
+#include "opt-A3.h"
 
 /* in exception.S */
 extern void asm_usermode(struct trapframe *tf);
@@ -74,7 +74,8 @@ void
 kill_curthread(vaddr_t epc, unsigned code, vaddr_t vaddr)
 {
 	int sig = 0;
-
+	(void) epc;
+	(void) vaddr;
 	KASSERT(code < NTRAPCODES);
 	switch (code) {
 	    case EX_IRQ:
@@ -107,14 +108,16 @@ kill_curthread(vaddr_t epc, unsigned code, vaddr_t vaddr)
 		sig = SIGFPE;
 		break;
 	}
-
+	#if OPT_A3
+  		sys__exit(sig);
+	#else
+		kprintf("Fatal user mode trap %u sig %d (%s, epc 0x%x, vaddr 0x%x)\n",
+		code, sig, trapcodenames[code], epc, vaddr);
+		panic("I don't know how to handle this\n");
+	#endif
 	/*
 	 * You will probably want to change this.
 	 */
-
-	kprintf("Fatal user mode trap %u sig %d (%s, epc 0x%x, vaddr 0x%x)\n",
-		code, sig, trapcodenames[code], epc, vaddr);
-	panic("I don't know how to handle this\n");
 }
 
 /*
@@ -232,6 +235,9 @@ mips_trap(struct trapframe *tf)
 	switch (code) {
 	case EX_MOD:
 		if (vm_fault(VM_FAULT_READONLY, tf->tf_vaddr)==0) {
+		#if OPT_A3
+			kill_curthread(tf->tf_epc, code, tf->tf_vaddr);
+		#endif
 			goto done;
 		}
 		break;

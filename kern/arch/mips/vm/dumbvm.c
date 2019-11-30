@@ -50,25 +50,78 @@
  * Wrap rma_stealmem in a spinlock.
  */
 static struct spinlock stealmem_lock = SPINLOCK_INITIALIZER;
+#ifdef OPT_A3
+static struct spinlock coremap_lock = SPINLOCK_INITIALIZER;
+int map_init =0;
+int *core_map;
+paddr_t start;
+paddr_t end;
+unsigned int num_pages;
+#endif
 
 void
 vm_bootstrap(void)
 {
-	/* Do nothing. */
+	#ifdef OPT_A3
+	ram_getsize(&start,&end);
+	num_pages = (end-start)/ PAGE_SIZE;
+	core_map = (int*)PADDR_TO_KVADDR(start);
+	// int core_num = num_pages * sizeof(int) / PAGE_SIZE + 1;
+	// start = start+core_num*PAGE_SIZE;
+	// num_pages = num_pages-core_num;
+	for(unsigned int i = 0;i<num_pages;i++){
+		core_map[i] = 0;
+	}
+	map_init =1;
+	#endif
 }
 
 static
 paddr_t
 getppages(unsigned long npages)
 {
-	paddr_t addr;
+	//kprintf("%lu\n",npages);
+	#ifdef OPT_A3
+		if (map_init ==1){
+			unsigned int potential_start = 0;
+			spinlock_acquire(&coremap_lock);
+			while (potential_start + npages <= num_pages) {
+				if (core_map[potential_start]==0){
+					for(unsigned int i =1;i<=npages;i++){
+						core_map[potential_start + i-1] = npages;
+					}
+					spinlock_release(&coremap_lock);
+					// kprintf("%lu\n",npages);
+					// for(unsigned int i = 0;i<num_pages;i++){
+					// 	kprintf("%d",core_map[i]);
+					// }
+					return start+potential_start*PAGE_SIZE;
+				}else{
+					potential_start++;
+				}
+			}
+			spinlock_release(&coremap_lock);
+			return 0;
+		}else{
+			paddr_t addr;
 
-	spinlock_acquire(&stealmem_lock);
+			spinlock_acquire(&stealmem_lock);
 
-	addr = ram_stealmem(npages);
-	
-	spinlock_release(&stealmem_lock);
-	return addr;
+			addr = ram_stealmem(npages);
+			
+			spinlock_release(&stealmem_lock);
+			return addr;
+		}
+	#else
+		paddr_t addr;
+
+		spinlock_acquire(&stealmem_lock);
+
+		addr = ram_stealmem(npages);
+		
+		spinlock_release(&stealmem_lock);
+		return addr;
+	#endif
 }
 
 /* Allocate/free some kernel-space virtual pages */
@@ -86,8 +139,20 @@ alloc_kpages(int npages)
 void 
 free_kpages(vaddr_t addr)
 {
-	/* nothing - leak the memory. */
-
+	#ifdef OPT_A3
+	spinlock_acquire(&coremap_lock);
+	paddr_t p_start= addr - MIPS_KSEG0;
+	unsigned int potential_start = (p_start-start)/PAGE_SIZE;
+	int num = core_map[potential_start];
+	for(int i =0;i<num;i++){
+		core_map[potential_start+i]=0;
+	}
+	// kprintf("%d, %d\n",potential_start,num);
+	// for(unsigned int i = 0;i<num_pages;i++){
+	// 	kprintf("%d",core_map[i]);
+	// }
+	spinlock_release(&coremap_lock);
+	#endif
 	(void)addr;
 }
 
@@ -120,8 +185,11 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 
 	switch (faulttype) {
 	    case VM_FAULT_READONLY:
-		/* We always create pages read-write, so we can't get this */
+	#if OPT_A3
+		return EFAULT;
+	#else
 		panic("dumbvm: got VM_FAULT_READONLY\n");
+	#endif
 	    case VM_FAULT_READ:
 	    case VM_FAULT_WRITE:
 		break;
@@ -167,8 +235,13 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 	vtop2 = vbase2 + as->as_npages2 * PAGE_SIZE;
 	stackbase = USERSTACK - DUMBVM_STACKPAGES * PAGE_SIZE;
 	stacktop = USERSTACK;
-
+	#if OPT_A3
+	int text = 0;
+	#endif
 	if (faultaddress >= vbase1 && faultaddress < vtop1) {
+		#if OPT_A3
+		text = 1;
+		#endif
 		paddr = (faultaddress - vbase1) + as->as_pbase1;
 	}
 	else if (faultaddress >= vbase2 && faultaddress < vtop2) {
@@ -187,21 +260,38 @@ vm_fault(int faulttype, vaddr_t faultaddress)
 	/* Disable interrupts on this CPU while frobbing the TLB. */
 	spl = splhigh();
 
+	int full = 0;
 	for (i=0; i<NUM_TLB; i++) {
 		tlb_read(&ehi, &elo, i);
 		if (elo & TLBLO_VALID) {
 			continue;
 		}
+		full=1;
 		ehi = faultaddress;
 		elo = paddr | TLBLO_DIRTY | TLBLO_VALID;
+#if OPT_A3		
+		if ((text == 1) && (as->flag ==1)){
+			elo &= ~TLBLO_DIRTY;
+		}
+#endif
 		DEBUG(DB_VM, "dumbvm: 0x%x -> 0x%x\n", faultaddress, paddr);
 		tlb_write(ehi, elo, i);
 		splx(spl);
 		return 0;
 	}
-
+#if OPT_A3
+	if (full==0){
+		ehi = faultaddress;
+		elo = paddr | TLBLO_DIRTY | TLBLO_VALID;
+		tlb_random(ehi, elo);
+		splx(spl);
+    	return 0;
+	}
+#else
 	kprintf("dumbvm: Ran out of TLB entries - cannot handle page fault\n");
 	splx(spl);
+	return EFAULT;
+#endif
 	return EFAULT;
 }
 
@@ -220,13 +310,22 @@ as_create(void)
 	as->as_pbase2 = 0;
 	as->as_npages2 = 0;
 	as->as_stackpbase = 0;
-
+#if OPT_A3
+	as->flag = 0;
+#endif
 	return as;
 }
 
 void
 as_destroy(struct addrspace *as)
 {
+
+	// kfree(as->as_pbase1);
+	// kfree(as->as_pbase2);
+	// kfree(as->as_stackpbase);
+	// kfree(as->as_pbase1);
+	// kfree(as->as_pbase2);
+	// kfree(as->as_stackpbase);
 	kfree(as);
 }
 
@@ -331,7 +430,6 @@ as_prepare_load(struct addrspace *as)
 	as_zero_region(as->as_pbase1, as->as_npages1);
 	as_zero_region(as->as_pbase2, as->as_npages2);
 	as_zero_region(as->as_stackpbase, DUMBVM_STACKPAGES);
-
 	return 0;
 }
 

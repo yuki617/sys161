@@ -45,7 +45,6 @@
 #include <syscall.h>
 #include <test.h>
 #include <copyinout.h>
-#include "opt-A2.h"
 #include <limits.h>
 
 /*
@@ -81,7 +80,7 @@ runprogram(char *program, char ** args, unsigned int nargs){
 	}
 
 	/* Switch to it and activate it. */
-	struct addrspace * oldas = curproc_setas(as);
+	curproc_setas(as);
 	as_activate();
 
 	/* Load the executable. */
@@ -120,15 +119,16 @@ runprogram(char *program, char ** args, unsigned int nargs){
       copyout(&stack[i],(userptr_t) temp_stack_ptr,sizeof(vaddr_t)) ;
     }
 
-	as_destroy(oldas);
+	//as_destroy(oldas);
 
 	vaddr_t userspace = 0;
 
 	if(arg_len >=1){
 		userspace = temp_stack_ptr;
 	}
+	kfree(stack);
 	/* Warp to user mode. */
-	 enter_new_process(arg_len /*argc*/, (userptr_t) userspace /*userspace addr of argv*/,
+	enter_new_process(arg_len /*argc*/, (userptr_t) userspace /*userspace addr of argv*/,
 			  ROUNDUP(temp_stack_ptr,8), entrypoint);
     panic("enter_new_process returned\n");
     return EINVAL;

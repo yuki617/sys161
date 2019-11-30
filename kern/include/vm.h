@@ -47,6 +47,7 @@
 
 /* Initialization function */
 void vm_bootstrap(void);
+paddr_t coremap_stealmem(unsigned long numpages);
 
 /* Fault handling function called by trap code */
 int vm_fault(int faulttype, vaddr_t faultaddress);

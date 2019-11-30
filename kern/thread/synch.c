@@ -168,6 +168,7 @@ lock_create(const char *name)
         lock->held =0;
         lock->wc =wchan_create(lock->lk_name);
         if (lock->wc == NULL) {
+                kfree(lock->lk_name);
                 kfree(lock);
                 return NULL;
         }
@@ -185,6 +186,7 @@ lock_destroy(struct lock *lock)
         kfree(lock->lk_name);
         spinlock_cleanup(&lock->spin);
         wchan_destroy(lock->wc);
+        kfree(lock->lk_name);
         kfree(lock);
 }
 
@@ -248,6 +250,7 @@ cv_create(const char *name)
         
         cv->cv_wc =wchan_create(cv->cv_name);
         if (cv->cv_wc == NULL) {
+                kfree(cv->cv_name);
                 kfree(cv);
                 return NULL;
         }
