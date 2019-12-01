@@ -37,6 +37,7 @@
 #include <mips/tlb.h>
 #include <addrspace.h>
 #include <vm.h>
+#include "opt-A3.h"
 
 /*
  * Dumb MIPS-only "VM system" that is intended to only be just barely
@@ -57,6 +58,7 @@ int *core_map;
 paddr_t start;
 paddr_t end;
 unsigned int num_pages;
+int check = 0;
 #endif
 
 void
@@ -66,9 +68,9 @@ vm_bootstrap(void)
 	ram_getsize(&start,&end);
 	num_pages = (end-start)/ PAGE_SIZE;
 	core_map = (int*)PADDR_TO_KVADDR(start);
-	// int core_num = num_pages * sizeof(int) / PAGE_SIZE + 1;
-	// start = start+core_num*PAGE_SIZE;
-	// num_pages = num_pages-core_num;
+	int core_num = num_pages * sizeof(int) / PAGE_SIZE + 1;
+	start = start+core_num*PAGE_SIZE;
+	num_pages = num_pages-core_num;
 	for(unsigned int i = 0;i<num_pages;i++){
 		core_map[i] = 0;
 	}
@@ -80,23 +82,26 @@ static
 paddr_t
 getppages(unsigned long npages)
 {
-	//kprintf("%lu\n",npages);
 	#ifdef OPT_A3
 		if (map_init ==1){
-			unsigned int potential_start = 0;
 			spinlock_acquire(&coremap_lock);
-			while (potential_start + npages <= num_pages) {
+		//kprintf("%lu\n",npages);
+		unsigned int pages = npages;
+			int potential_start = 0;
+			while (potential_start + pages <= num_pages) {
 				if (core_map[potential_start]==0){
-					for(unsigned int i =1;i<=npages;i++){
-						core_map[potential_start + i-1] = npages;
+					for(unsigned int i =1;i<=pages;i++){
+						core_map[potential_start + i-1] = pages;
 					}
 					spinlock_release(&coremap_lock);
-					// kprintf("%lu\n",npages);
+					// kprintf("%d,%d\n",potential_start,
+					// pages);
 					// for(unsigned int i = 0;i<num_pages;i++){
 					// 	kprintf("%d",core_map[i]);
 					// }
 					return start+potential_start*PAGE_SIZE;
 				}else{
+					//kprintf("not 0: %d\n",core_map[potential_start]);
 					potential_start++;
 				}
 			}
@@ -144,6 +149,7 @@ free_kpages(vaddr_t addr)
 	paddr_t p_start= addr - MIPS_KSEG0;
 	unsigned int potential_start = (p_start-start)/PAGE_SIZE;
 	int num = core_map[potential_start];
+	//(void)num;
 	for(int i =0;i<num;i++){
 		core_map[potential_start+i]=0;
 	}
@@ -319,10 +325,12 @@ as_create(void)
 void
 as_destroy(struct addrspace *as)
 {
-
-	// kfree(as->as_pbase1);
-	// kfree(as->as_pbase2);
-	// kfree(as->as_stackpbase);
+	// if (check ==1){
+		free_kpages(PADDR_TO_KVADDR(as->as_pbase1));
+		free_kpages(PADDR_TO_KVADDR(as->as_pbase2));
+		free_kpages(PADDR_TO_KVADDR(as->as_stackpbase));
+	// 	check =0;
+	// }
 	// kfree(as->as_pbase1);
 	// kfree(as->as_pbase2);
 	// kfree(as->as_stackpbase);
@@ -426,6 +434,9 @@ as_prepare_load(struct addrspace *as)
 	if (as->as_stackpbase == 0) {
 		return ENOMEM;
 	}
+	#ifdef OPT_A3
+	check = 1;
+	#endif
 	
 	as_zero_region(as->as_pbase1, as->as_npages1);
 	as_zero_region(as->as_pbase2, as->as_npages2);

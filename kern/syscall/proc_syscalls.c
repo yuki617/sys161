@@ -18,7 +18,6 @@
 #include <limits.h>
 
 
-
 int execv(const char *program,char**args){
     char * program_kernel = kmalloc((strlen(program) + 1) * sizeof(char));
     vaddr_t entrypoint, stackptr;
@@ -172,7 +171,6 @@ sys_waitpid(pid_t pid,
      the specified process.   
      In fact, this will return 0 even if the specified process
      is still running, and even if it never existed in the first place.
-
      Fix this!
   */
 

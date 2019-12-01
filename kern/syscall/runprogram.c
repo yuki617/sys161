@@ -45,6 +45,7 @@
 #include <syscall.h>
 #include <test.h>
 #include <copyinout.h>
+#include "opt-A2.h"
 #include <limits.h>
 
 /*
@@ -126,9 +127,8 @@ runprogram(char *program, char ** args, unsigned int nargs){
 	if(arg_len >=1){
 		userspace = temp_stack_ptr;
 	}
-	kfree(stack);
 	/* Warp to user mode. */
-	enter_new_process(arg_len /*argc*/, (userptr_t) userspace /*userspace addr of argv*/,
+	 enter_new_process(arg_len /*argc*/, (userptr_t) userspace /*userspace addr of argv*/,
 			  ROUNDUP(temp_stack_ptr,8), entrypoint);
     panic("enter_new_process returned\n");
     return EINVAL;
@@ -189,4 +189,3 @@ runprogram(char *progname)
 	return EINVAL;
 }
 #endif
-
